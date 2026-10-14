@@ -23,15 +23,43 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      - name: Run unit tests
+        run: gradle testDebugUnitTest --no-daemon
+
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
 
-      - name: Rename APK
-        run: cp build/outputs/apk/debug/*.apk muimm-bot.apk
+      - name: Prepare APK and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t apks < <(find app/build/outputs/apk/debug build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' 2>/dev/null | sort -u)
+          if [ "${#apks[@]}" -ne 1 ]; then
+            echo "Expected exactly one debug APK, found ${#apks[@]}"
+            printf '%s\n' "${apks[@]}"
+            exit 1
+          fi
+          cp "${apks[0]}" muimm-bot.apk
+          sha256sum muimm-bot.apk > muimm-bot.apk.sha256
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: muimm-bot-apk
+          path: |
+            muimm-bot.apk
+            muimm-bot.apk.sha256
+          if-no-files-found: error
 
       - name: Publish APK release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: Build ${{ github.run_number }}
-          files: muimm-bot.apk
+          body: |
+            Automated debug APK build.
+            Commit: ${{ github.sha }}
+            SHA-256 is attached as muimm-bot.apk.sha256.
+          files: |
+            muimm-bot.apk
+            muimm-bot.apk.sha256
