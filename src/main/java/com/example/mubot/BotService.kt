@@ -35,7 +35,8 @@ import java.util.concurrent.TimeUnit
  * MU Immortal - Raklion boss kontrol botu.
  *
  * Mantik:
- *  - Her kanalda (1,2,3) haritayi acar, sol listeden Raklion 1/2/3'u sirayla secer.
+ *  - Raklion 1/2 konumlari sohbet sekmesinden kaydedilmis dokunuslarla acilir.
+ *  - Boss hedefleri harita uzerinde secilir; harita listesiyle bolge degisimi yapilmaz.
  *  - Ghost Aragog ismi KIRMIZI ise canli, GRI ise olu demektir.
  *  - Canliysa boss'a dokunur (oyun yuruturu), sonra Manual dugmesine basip oyunun
  *    kendi otomatik saldirisini acar. Boss olunce otomatigi kapatir, siradaki kanala gecer.
@@ -328,36 +329,6 @@ class BotService : AccessibilityService() {
 
     private fun orangeAt(b: Bitmap, name: String): Boolean =
         frac(b, name, 0.012f, 0.020f) { c -> isOrange(c) } >= 0.12f
-
-    private data class TextHit(val text: String, val x: Float, val y: Float)
-
-    /** OCR ile ekrandaki satirlari ve satir merkezlerini bulur. */
-    private fun readScreenText(b: Bitmap): List<TextHit> {
-        val latch = CountDownLatch(1)
-        var hits: List<TextHit> = emptyList()
-        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-        try {
-            recognizer.process(InputImage.fromBitmap(b, 0))
-                .addOnSuccessListener { vision ->
-                    hits = vision.textBlocks.flatMap { block ->
-                        block.lines.mapNotNull { line ->
-                            val box = line.boundingBox ?: return@mapNotNull null
-                            TextHit(
-                                line.text,
-                                ((box.left + box.right) / 2f) / b.width,
-                                ((box.top + box.bottom) / 2f) / b.height
-                            )
-                        }
-                    }
-                }
-                .addOnCompleteListener { latch.countDown() }
-            latch.await(4, TimeUnit.SECONDS)
-        } catch (_: Exception) {
-        } finally {
-            recognizer.close()
-        }
-        return hits
-    }
 
     private fun normalizedText(s: String): String =
         s.lowercase().replace(Regex("[^a-z0-9]"), "")
