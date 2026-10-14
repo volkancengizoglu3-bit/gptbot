@@ -21,8 +21,11 @@ import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.Switch
+import android.text.InputType
 import android.widget.TextView
 import android.widget.Toast
 import com.google.mlkit.vision.common.InputImage
@@ -616,7 +619,7 @@ class BotService : AccessibilityService() {
             val elapsed = System.currentTimeMillis() - t0
             if (elapsed < 120_000L) pause(minOf(5_000L, 120_000L - elapsed).toInt())
             if (System.currentTimeMillis() - t0 >= 120_000L) {
-                updateBuffThreshold()
+                if (prefs().getBoolean("buffEnabled", true)) updateBuffThreshold()
                 openMap()
                 val b = grab()
                 if (b == null) {
@@ -659,46 +662,94 @@ class BotService : AccessibilityService() {
     }
 
     private fun runLoop() {
-        // Her calisma basinda buff noktasina git (Raklion 2 / kanal 1).
+        val buffEnabled = { prefs().getBoolean("buffEnabled", true) }
+        if (buffEnabled()) {
+            switchLine(1)
+            selectRaklion(2)
+            walkToPoint("buffPoint", "Buff konumu")
+            closeMapIfOpen()
+            verifyStatsAfterBuff()
+        }
+
+        // Tam dongu: R1 kanal 1/2/3 (iki boss), sonra R2 kanal 1/2/3 (bir boss).
+        while (running) {
+            for (line in 1..3) {
+                if (!running) throw StopEx()
+                switchLine(line)
+                selectRaklion(1)
+                for (bossIndex in 0..1) {
+                    if (!running) throw StopEx()
+                    val target = if (bossIndex == 0) "targetR1A" else "targetR1B"
+                    activeTarget = target
+                    val check = grab() ?: fail("Boss haritasi okunamadi")
+                    if (redFrac(check, 1) < RED_THR) {
+                        pause(1800)
+                        val retry = grab() ?: fail("Boss durumu tekrar okunamadi")
+                        if (redFrac(retry, 1) < RED_THR) {
+                            say("Raklion 1 boss durumu belirsiz/olu; bu hedef atlanmiyor, yeniden kontrol ediliyor")
+                            pause(2500)
+                            val confirm = grab() ?: fail("Boss durumu dogrulanamadi")
+                            if (redFrac(confirm, 1) < RED_THR) {
+                                say("Boss canli oldugu dogrulanamadi; guvenli durus")
+                                fail("Boss durumu kesin degil; hedef atlanmadi")
+                            }
+                        }
+                    }
+                    fightBoss(1)
+                    handleBuffIfNeeded(buffEnabled())
+                }
+                selectRaklion(2)
+                activeTarget = "targetR2"
+                val r2Check = grab() ?: fail("Raklion 2 boss haritasi okunamadi")
+                if (redFrac(r2Check, 2) < RED_THR) {
+                    pause(1800)
+                    val retry = grab() ?: fail("Raklion 2 boss durumu tekrar okunamadi")
+                    if (redFrac(retry, 2) < RED_THR) {
+                        say("Raklion 2 boss durumu belirsiz/olu; atlanmiyor")
+                        fail("Raklion 2 boss canli/olu durumu kesin degil")
+                    }
+                }
+                fightBoss(2)
+                handleBuffIfNeeded(buffEnabled())
+            }
+        }
+    }
+
+    private fun handleBuffIfNeeded(enabled: Boolean) {
+        if (!enabled) {
+            pendingBuff = false
+            return
+        }
+        val stats = readCombatStats() ?: run {
+            say("ATK/DEF okunamadi; buff karari verilmedi")
+            return
+        }
+        val targetAtk = prefs().getInt("targetAtk", 0)
+        val targetDef = prefs().getInt("targetDef", 0)
+        val needAtk = targetAtk > 0 && stats.atk < targetAtk
+        val needDef = targetDef > 0 && stats.def < targetDef
+        if (!needAtk && !needDef) {
+            pendingBuff = false
+            say("ATK/DEF hedefleri karsilaniyor: ${stats.atk}/${stats.def}")
+            return
+        }
+        say("Buff noktasina gidiliyor; mevcut ATK/DEF ${stats.atk}/${stats.def}")
         switchLine(1)
         selectRaklion(2)
         walkToPoint("buffPoint", "Buff konumu")
         closeMapIfOpen()
-        val initialStats = readCombatStats()
-        if (initialStats != null) { baselineAtk = initialStats.atk; baselineDef = initialStats.def }
-        var line = 1
-        while (running) {
-            if (line != 1 || prefs().getBoolean("routeStarted", false)) switchLine(line)
-            prefs().edit().putBoolean("routeStarted", true).apply()
-            // Raklion 2: bir boss; Raklion 1: iki boss. Emin olunmayan boss atlanmaz.
-            for (mapNo in listOf(2, 1)) {
-                selectRaklion(mapNo)
-                val count = if (mapNo == 2) 1 else 2
-                for (bossIndex in 0 until count) {
-                    if (!running) throw StopEx()
-                    activeTarget = when { mapNo == 2 -> "targetR2"; bossIndex == 0 -> "targetR1A"; else -> "targetR1B" }
-                    val b = grab() ?: fail("Boss kontrolu icin ekran okunamadi")
-                    val label = if (mapNo == 1) "boss1" else "boss2"
-                    if (redFrac(b, if (mapNo == 1) 1 else 2) < RED_THR) {
-                        say("Raklion $mapNo boss etiketi belirsiz; atlanmiyor, tekrar kontrol ediliyor")
-                        pause(3000)
-                        val retry = grab() ?: fail("Boss durumu belirsiz")
-                        if (redFrac(retry, if (mapNo == 1) 1 else 2) < RED_THR) {
-                            say("Boss bulunamadi; guvenli durus. Koordinat/etiket ayarini kontrol et")
-                            fail("Boss canli/olu durumu guvenle belirlenemedi")
-                        }
-                    }
-                    fightBoss(mapNo)
-                    if (pendingBuff) {
-                        selectRaklion(2)
-                        walkToPoint("buffPoint", "Buff konumu")
-                        closeMapIfOpen()
-                        pendingBuff = false
-                    }
-                }
-            }
-            line = line % 3 + 1
+        verifyStatsAfterBuff()
+        pendingBuff = false
+    }
+
+    private fun verifyStatsAfterBuff() {
+        pause(1500)
+        val stats = readCombatStats()
+        if (stats == null) {
+            say("Buff sonrasi ATK/DEF okunamadi; rota kaldigi yerden devam edecek")
+            return
         }
+        say("Buff sonrasi ATK/DEF: ${stats.atk}/${stats.def}")
     }
 
     @Volatile private var pendingBuff = false
@@ -742,18 +793,14 @@ class BotService : AccessibilityService() {
     }
 
     private fun updateBuffThreshold() {
+        if (!prefs().getBoolean("buffEnabled", true)) return
         val stats = readCombatStats() ?: return
-        if (baselineAtk == null || baselineDef == null) {
-            baselineAtk = stats.atk
-            baselineDef = stats.def
-            say("ATK/DEF tabani kaydedildi: ${stats.atk}/${stats.def}")
-            return
-        }
-        val atkDrop = baselineAtk!! - stats.atk
-        val defDrop = baselineDef!! - stats.def
-        if (atkDrop >= 850 || defDrop >= 350) {
+        val targetAtk = prefs().getInt("targetAtk", 0)
+        val targetDef = prefs().getInt("targetDef", 0)
+        if ((targetAtk > 0 && stats.atk < targetAtk) ||
+            (targetDef > 0 && stats.def < targetDef)) {
             pendingBuff = true
-            say("Buff gerekli (ATK -$atkDrop / DEF -$defDrop); mevcut savas bitince uygulanacak")
+            say("Buff hedefi altinda: ATK/DEF ${stats.atk}/${stats.def}")
         }
     }
 
@@ -903,7 +950,8 @@ class BotService : AccessibilityService() {
         addBtn(col, lb)
 
         addBtn(col, mkBtn("Test") { runTest() })
-        addBtn(col, mkBtn("Ayar") { toggleMenu() })
+        addBtn(col, mkBtn("Ayar") { showSettings() })
+        addBtn(col, mkBtn("Nokta Ayarlari") { toggleMenu() })
 
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -918,6 +966,96 @@ class BotService : AccessibilityService() {
         wm.addView(col, lp)
         panel = col
         updateUi()
+    }
+
+    private fun showSettings() {
+        if (running) {
+            Toast.makeText(this, "Ayar degistirmek icin once botu durdur", Toast.LENGTH_LONG).show()
+            return
+        }
+        val old = menu
+        if (old != null) {
+            try { wm.removeView(old) } catch (_: Exception) {}
+            menu = null
+        }
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+        root.setPadding(dp(12), dp(10), dp(12), dp(10))
+        root.setBackgroundColor(0xEE202020.toInt())
+
+        val title = TextView(this)
+        title.text = "Buff Ayarlari"
+        title.textSize = 16f
+        title.setTextColor(Color.WHITE)
+        root.addView(title)
+
+        val toggle = Switch(this)
+        toggle.text = "Buff kontrolu aktif"
+        toggle.setTextColor(Color.WHITE)
+        toggle.isChecked = prefs().getBoolean("buffEnabled", true)
+        root.addView(toggle)
+
+        fun field(label: String, key: String): EditText {
+            val caption = TextView(this)
+            caption.text = label
+            caption.setTextColor(Color.WHITE)
+            root.addView(caption)
+            val edit = EditText(this)
+            edit.inputType = InputType.TYPE_CLASS_NUMBER
+            edit.setSingleLine(true)
+            edit.setText(prefs().getInt(key, 0).let { if (it == 0) "" else it.toString() })
+            edit.hint = "0 = bu degeri kontrol etme"
+            edit.setTextColor(Color.WHITE)
+            edit.setHintTextColor(0xFFBBBBBB.toInt())
+            root.addView(edit, LinearLayout.LayoutParams(dp(230), dp(48)))
+            return edit
+        }
+        val atkInput = field("Hedef ATK", "targetAtk")
+        val defInput = field("Hedef DEF", "targetDef")
+        val help = TextView(this)
+        help.text = "Hedef 0 ise ilgili deger kontrol edilmez. Degisiklikler kaydedilir."
+        help.setTextColor(Color.LTGRAY)
+        help.textSize = 11f
+        root.addView(help)
+
+        val actions = LinearLayout(this)
+        actions.orientation = LinearLayout.HORIZONTAL
+        val save = mkBtn("Kaydet") {
+            val atk = atkInput.text.toString().trim().toIntOrNull()
+            val def = defInput.text.toString().trim().toIntOrNull()
+            if (atk == null || def == null || atk < 0 || def < 0) {
+                Toast.makeText(this, "ATK/DEF icin 0 veya pozitif tam sayi gir", Toast.LENGTH_LONG).show()
+            } else {
+                prefs().edit()
+                    .putBoolean("buffEnabled", toggle.isChecked)
+                    .putInt("targetAtk", atk)
+                    .putInt("targetDef", def)
+                    .apply()
+                try { wm.removeView(root) } catch (_: Exception) {}
+                if (menu === root) menu = null
+                Toast.makeText(this, "Buff ayarlari kaydedildi", Toast.LENGTH_SHORT).show()
+            }
+        }
+        val close = mkBtn("Kapat") {
+            try { wm.removeView(root) } catch (_: Exception) {}
+            if (menu === root) menu = null
+        }
+        addBtn(actions, save)
+        addBtn(actions, close)
+        root.addView(actions)
+
+        val lp = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        )
+        lp.gravity = Gravity.TOP or Gravity.START
+        lp.x = dp(200)
+        lp.y = dp(10)
+        wm.addView(root, lp)
+        menu = root
     }
 
     private fun toggleMenu() {
