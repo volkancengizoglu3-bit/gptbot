@@ -376,6 +376,41 @@ class BotService : AccessibilityService() {
         tapPx(fx * screenW, fy * screenH)
     }
 
+    // Harita listesini gercek bir yukari kaydirma hareketiyle asagi indir.
+    // Liste daha asagidaki bolgeleri gostersin diye parmak alttan uste gider.
+    private fun swipeMapListDown(): Boolean {
+        refreshScreen()
+        val x = screenW * 0.22f
+        val startY = screenH * 0.80f
+        val endY = screenH * 0.34f
+        val path = Path().apply {
+            moveTo(x, startY)
+            lineTo(x, endY)
+        }
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0, 550))
+            .build()
+        val latch = CountDownLatch(1)
+        var completed = false
+        val accepted = dispatchGesture(gesture, object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                completed = true
+                latch.countDown()
+            }
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                latch.countDown()
+            }
+        }, null)
+        if (accepted) latch.await(2, TimeUnit.SECONDS)
+        if (completed) {
+            sent++
+            pause(500)
+            return true
+        }
+        cancelled++
+        return false
+    }
+
     private fun tapPoint(name: String) {
         val p = pt(name)
         tapFrac(p.first, p.second)
@@ -431,8 +466,12 @@ class BotService : AccessibilityService() {
             val b = grab() ?: fail("Harita listesi okunamadi")
             if (listLayoutOk(b)) found = true
             if (!found) {
-                tapPoint("mapScroll")
-                pause(450)
+                if (!swipeMapListDown()) {
+                    say("Harita listesi kaydirilamadi; 'Ayar' menusunden mapScroll alanini kontrol et.")
+                    pause(700)
+                } else {
+                    pause(450)
+                }
             }
         }
         tapPoint("raklionParent")
