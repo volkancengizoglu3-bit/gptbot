@@ -21,10 +21,10 @@ class MainActivity : Activity() {
 
         val info = TextView(this)
         info.textSize = 16f
-        info.text = "MU Immortal - Raklion Boss Bot\n\n" +
+        info.text = "Botingen - MU Immortal Raklion Bot\n\n" +
             "KURULUM\n" +
-            "1) Asagidaki dugmeyle Erisilebilirlik ayarlarini ac, 'MU Boss Bot' servisini ac.\n" +
-            "   Servis kapali gorunup acilmiyorsa: Ayarlar > Uygulamalar > MU Boss Bot > " +
+            "1) Asagidaki dugmeyle Erisilebilirlik ayarlarini ac, 'Botingen' servisini ac.\n" +
+            "   Servis kapali gorunup acilmiyorsa: Ayarlar > Uygulamalar > Botingen > " +
             "sag ust uc nokta > 'Kisitli ayarlara izin ver', sonra tekrar dene.\n" +
             "2) Oyuna gir, Raklion'da bir haritada dur. Sol tarafta kucuk bir panel gorunecek.\n" +
             "3) 'Test' dugmesine bas: noktalar kirmizi isaretle gosterilir. Yanlis olanlari " +
