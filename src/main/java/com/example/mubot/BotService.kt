@@ -671,46 +671,40 @@ class BotService : AccessibilityService() {
             verifyStatsAfterBuff()
         }
 
-        // Tam dongu: R1 kanal 1/2/3 (iki boss), sonra R2 kanal 1/2/3 (bir boss).
+        // Istenen sira: Raklion 1 kanal 1/2/3, sonra Raklion 2 kanal 1/2/3.
         while (running) {
-            for (line in 1..3) {
-                if (!running) throw StopEx()
-                switchLine(line)
-                selectRaklion(1)
-                for (bossIndex in 0..1) {
+            for (mapNo in listOf(1, 2)) {
+                for (line in 1..3) {
                     if (!running) throw StopEx()
-                    val target = if (bossIndex == 0) "targetR1A" else "targetR1B"
-                    activeTarget = target
-                    val check = grab() ?: fail("Boss haritasi okunamadi")
-                    if (redFrac(check, 1) < RED_THR) {
-                        pause(1800)
-                        val retry = grab() ?: fail("Boss durumu tekrar okunamadi")
-                        if (redFrac(retry, 1) < RED_THR) {
-                            say("Raklion 1 boss durumu belirsiz/olu; bu hedef atlanmiyor, yeniden kontrol ediliyor")
-                            pause(2500)
-                            val confirm = grab() ?: fail("Boss durumu dogrulanamadi")
-                            if (redFrac(confirm, 1) < RED_THR) {
-                                say("Boss canli oldugu dogrulanamadi; guvenli durus")
-                                fail("Boss durumu kesin degil; hedef atlanmadi")
+                    switchLine(line)
+                    selectRaklion(mapNo)
+                    val count = if (mapNo == 1) 2 else 1
+                    for (bossIndex in 0 until count) {
+                        if (!running) throw StopEx()
+                        val target = when {
+                            mapNo == 2 -> "targetR2"
+                            bossIndex == 0 -> "targetR1A"
+                            else -> "targetR1B"
+                        }
+                        activeTarget = target
+                        val bossNumber = if (mapNo == 1) 1 else 2
+                        val first = grab() ?: fail("Boss durumu okunamadi")
+                        val firstScore = redFrac(first, bossNumber)
+                        if (firstScore < RED_THR) {
+                            pause(1800)
+                            val second = grab() ?: fail("Boss durumu tekrar okunamadi")
+                            val secondScore = redFrac(second, bossNumber)
+                            if (secondScore < RED_THR) {
+                                // Dusuk kirmizi oranini olu kabul edip atlamiyoruz:
+                                // etiket/ikon okunamadigi durumda yanlis hedefe yurume riski var.
+                                say("Raklion $mapNo boss ikonu canli olarak dogrulanamadi; guvenli durus")
+                                fail("Boss canli/olu durumu kesin degil; hedef atlanmadi")
                             }
                         }
-                    }
-                    fightBoss(1)
-                    handleBuffIfNeeded(buffEnabled())
-                }
-                selectRaklion(2)
-                activeTarget = "targetR2"
-                val r2Check = grab() ?: fail("Raklion 2 boss haritasi okunamadi")
-                if (redFrac(r2Check, 2) < RED_THR) {
-                    pause(1800)
-                    val retry = grab() ?: fail("Raklion 2 boss durumu tekrar okunamadi")
-                    if (redFrac(retry, 2) < RED_THR) {
-                        say("Raklion 2 boss durumu belirsiz/olu; atlanmiyor")
-                        fail("Raklion 2 boss canli/olu durumu kesin degil")
+                        fightBoss(mapNo)
+                        handleBuffIfNeeded(buffEnabled())
                     }
                 }
-                fightBoss(2)
-                handleBuffIfNeeded(buffEnabled())
             }
         }
     }
