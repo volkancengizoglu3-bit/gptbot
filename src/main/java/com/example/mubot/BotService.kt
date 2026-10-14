@@ -328,6 +328,10 @@ class BotService : AccessibilityService() {
     private fun redFrac(b: Bitmap, m: Int): Float =
         frac(b, "boss" + m, 0.035f, 0.012f) { c -> isRed(c) }
 
+    /** Boss harita simgesindeki parlak kirmizi oranini olcer. */
+    private fun targetRedFrac(b: Bitmap, target: String): Float =
+        frac(b, target, 0.020f, 0.020f) { px -> isRed(px) }
+
     private fun bossAlive(b: Bitmap, m: Int): Boolean = redFrac(b, m) >= RED_THR
 
     private fun orangeAt(b: Bitmap, name: String): Boolean =
@@ -689,17 +693,17 @@ class BotService : AccessibilityService() {
                         activeTarget = target
                         val bossNumber = if (mapNo == 1) 1 else 2
                         val first = grab() ?: fail("Boss durumu okunamadi")
-                        val firstScore = redFrac(first, bossNumber)
-                        if (firstScore < RED_THR) {
-                            pause(1800)
-                            val second = grab() ?: fail("Boss durumu tekrar okunamadi")
-                            val secondScore = redFrac(second, bossNumber)
-                            if (secondScore < RED_THR) {
-                                // Dusuk kirmizi oranini olu kabul edip atlamiyoruz:
-                                // etiket/ikon okunamadigi durumda yanlis hedefe yurume riski var.
-                                say("Raklion $mapNo boss ikonu canli olarak dogrulanamadi; guvenli durus")
-                                fail("Boss canli/olu durumu kesin degil; hedef atlanmadi")
-                            }
+                        val firstScore = targetRedFrac(first, target)
+                        pause(1200)
+                        val second = grab() ?: fail("Boss durumu tekrar okunamadi")
+                        val secondScore = targetRedFrac(second, target)
+                        if (firstScore < RED_THR && secondScore < RED_THR) {
+                            say("Raklion $mapNo boss ikonu iki kontrolde de soluk: olu kabul edilip atlaniyor")
+                            continue
+                        }
+                        if (firstScore < RED_THR || secondScore < RED_THR) {
+                            say("Boss ikonu belirsiz; yanlis hedefe gitmemek icin durduruluyor")
+                            fail("Boss canli/olu durumu kesin degil")
                         }
                         fightBoss(mapNo)
                         handleBuffIfNeeded(buffEnabled(), line, mapNo)
