@@ -8,7 +8,7 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.example.mubot"
+        applicationId = "com.botingen.muimmortalbot"
         minSdk = 30
         targetSdk = 34
         versionCode = 1
