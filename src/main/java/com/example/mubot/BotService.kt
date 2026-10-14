@@ -332,11 +332,51 @@ class BotService : AccessibilityService() {
     private fun orangeAt(b: Bitmap, name: String): Boolean =
         frac(b, name, 0.012f, 0.020f) { c -> isOrange(c) } >= 0.12f
 
-    private fun listLayoutOk(b: Bitmap): Boolean {
-        for (m in 1..3) {
-            if (frac(b, "map" + m, 0.05f, 0.008f) { c -> isSelected(c) } >= 0.4f) return true
+    private data class TextHit(val text: String, val x: Float, val y: Float)
+
+    /** OCR ile ekrandaki satirlari ve satir merkezlerini bulur. */
+    private fun readScreenText(b: Bitmap): List<TextHit> {
+        val latch = CountDownLatch(1)
+        var hits: List<TextHit> = emptyList()
+        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        try {
+            recognizer.process(InputImage.fromBitmap(b, 0))
+                .addOnSuccessListener { vision ->
+                    hits = vision.textBlocks.flatMap { block ->
+                        block.lines.mapNotNull { line ->
+                            val box = line.boundingBox ?: return@mapNotNull null
+                            TextHit(
+                                line.text,
+                                ((box.left + box.right) / 2f) / b.width,
+                                ((box.top + box.bottom) / 2f) / b.height
+                            )
+                        }
+                    }
+                }
+                .addOnCompleteListener { latch.countDown() }
+            latch.await(4, TimeUnit.SECONDS)
+        } catch (_: Exception) {
+        } finally {
+            recognizer.close()
         }
-        return false
+        return hits
+    }
+
+    private fun normalizedText(s: String): String =
+        s.lowercase().replace(Regex("[^a-z0-9]"), "")
+
+    private fun findRaklionParent(b: Bitmap): TextHit? =
+        readScreenText(b).firstOrNull { hit ->
+            val t = normalizedText(hit.text)
+            t.contains("raklion") && !t.contains("raklion1") &&
+                !t.contains("raklion2") && !t.contains("raklion3")
+        }
+
+    private fun findRaklionChild(b: Bitmap, m: Int): TextHit? {
+        val target = "raklion" + m
+        return readScreenText(b).firstOrNull { hit ->
+            normalizedText(hit.text).contains(target)
+        }
     }
 
     // ------------------------------------------------------------------ dokunma
@@ -460,23 +500,34 @@ class BotService : AccessibilityService() {
 
     private fun selectRaklion(m: Int) {
         openMap()
-        // Liste ekraninda Raklion satiri gorunmuyorsa kontrollu sekilde asagi kaydir.
-        var found = false
-        repeat(4) {
+
+        // Raklion ana satirini OCR ile gercekten bulana kadar kucuk adimlarla kaydir.
+        var parent: TextHit? = null
+        repeat(8) {
             val b = grab() ?: fail("Harita listesi okunamadi")
-            if (listLayoutOk(b)) found = true
-            if (!found) {
-                if (!swipeMapListDown()) {
-                    say("Harita listesi kaydirilamadi; 'Ayar' menusunden mapScroll alanini kontrol et.")
-                    pause(700)
-                } else {
-                    pause(450)
-                }
-            }
+            parent = findRaklionParent(b)
+            if (parent != null) return@repeat
+            if (!swipeMapListDown()) fail("Harita listesi kaydirilamadi")
+            pause(350)
         }
-        tapPoint("raklionParent")
+        val parentHit = parent ?: fail("Raklion ana satiri 8 kaydirmada bulunamadi; yanlis satira tiklanmadi")
+        if (!tapPx(parentHit.x * screenW, parentHit.y * screenH)) {
+            fail("Raklion ana satirina dokunulamadi")
+        }
         pause(700)
-        tapPoint(if (m == 1) "raklion1Child" else "raklion2Child")
+
+        // Alt satirlar acilinca hedef olan Raklion 1/2 yazisini OCR ile bul ve merkezine dokun.
+        var child: TextHit? = null
+        repeat(3) {
+            val b = grab() ?: fail("Raklion alt listesi okunamadi")
+            child = findRaklionChild(b, m)
+            if (child != null) return@repeat
+            pause(400)
+        }
+        val childHit = child ?: fail("Raklion $m alt satiri ekranda okunamadi; yanlis haritaya tiklanmadi")
+        if (!tapPx(childHit.x * screenW, childHit.y * screenH)) {
+            fail("Raklion $m alt satirina dokunulamadi")
+        }
         pause(1000)
         // Secimden sonra harita acik kalir; nokta ve boss etiketi ayridir.
     }
