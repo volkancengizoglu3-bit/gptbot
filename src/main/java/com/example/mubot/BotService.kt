@@ -702,14 +702,14 @@ class BotService : AccessibilityService() {
                             }
                         }
                         fightBoss(mapNo)
-                        handleBuffIfNeeded(buffEnabled())
+                        handleBuffIfNeeded(buffEnabled(), line, mapNo)
                     }
                 }
             }
         }
     }
 
-    private fun handleBuffIfNeeded(enabled: Boolean) {
+    private fun handleBuffIfNeeded(enabled: Boolean, resumeLine: Int, resumeMap: Int) {
         if (!enabled) {
             pendingBuff = false
             return
@@ -734,6 +734,9 @@ class BotService : AccessibilityService() {
         closeMapIfOpen()
         verifyStatsAfterBuff()
         pendingBuff = false
+        // Buff noktasindan sonra tam olarak kaldigimiz kanal ve haritaya don.
+        switchLine(resumeLine)
+        selectRaklion(resumeMap)
     }
 
     private fun verifyStatsAfterBuff() {
