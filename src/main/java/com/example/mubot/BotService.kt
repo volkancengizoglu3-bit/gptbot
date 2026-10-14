@@ -330,6 +330,41 @@ class BotService : AccessibilityService() {
     private fun orangeAt(b: Bitmap, name: String): Boolean =
         frac(b, name, 0.012f, 0.020f) { c -> isOrange(c) } >= 0.12f
 
+    private data class TextHit(val text: String, val x: Float, val y: Float)
+
+    /** ML Kit OCR; coordinates are normalized to the captured screenshot. */
+    private fun readScreenText(bitmap: Bitmap): List<TextHit> {
+        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        val latch = CountDownLatch(1)
+        var hits: List<TextHit> = emptyList()
+        var failure: Exception? = null
+        recognizer.process(InputImage.fromBitmap(bitmap, 0))
+            .addOnSuccessListener { result ->
+                hits = result.textBlocks.flatMap { block ->
+                    block.lines.mapNotNull { line ->
+                        val box = line.boundingBox ?: return@mapNotNull null
+                        TextHit(
+                            line.text,
+                            ((box.left + box.right) / 2f) / bitmap.width,
+                            ((box.top + box.bottom) / 2f) / bitmap.height
+                        )
+                    }
+                }
+                latch.countDown()
+            }
+            .addOnFailureListener { e ->
+                failure = e
+                latch.countDown()
+            }
+        if (!latch.await(5, TimeUnit.SECONDS)) {
+            recognizer.close()
+            throw IllegalStateException("OCR zaman asimina ugradi")
+        }
+        recognizer.close()
+        failure?.let { throw IllegalStateException("OCR basarisiz", it) }
+        return hits
+    }
+
     private fun normalizedText(s: String): String =
         s.lowercase().replace(Regex("[^a-z0-9]"), "")
 
