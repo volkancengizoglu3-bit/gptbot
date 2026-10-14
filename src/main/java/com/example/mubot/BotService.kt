@@ -57,6 +57,7 @@ class BotService : AccessibilityService() {
 
         val NAMES = listOf(
             "minimap", "wire", "ch1", "ch2", "ch3", "switchLine", "closeChannel", "closeMap",
+            "chatOpen", "raklion1Coord", "raklion2Coord",
             "mapScroll", "raklionParent", "raklion1Child", "raklion2Child",
             "targetR2", "targetR1A", "targetR1B", "boss1", "boss2", "buffPoint", "manual"
         )
@@ -70,6 +71,9 @@ class BotService : AccessibilityService() {
             "switchLine" to "Switch Line butonu",
             "closeChannel" to "Kanal ekrani X (kapat) dugmesi",
             "closeMap" to "Harita ekrani X (kapat) dugmesi",
+            "chatOpen" to "Sohbeti acan dugme (manuel koordinat)",
+            "raklion1Coord" to "Sohbet icinde Raklion 1 gecis noktasi (manuel)",
+            "raklion2Coord" to "Sohbet icinde Raklion 2 gecis noktasi (manuel)",
             "mapScroll" to "Harita listesinde asagi kaydirma noktasi",
             "raklionParent" to "Harita listesindeki Raklion ana satiri (ac/kapat)",
             "raklion1Child" to "Raklion acildiktan sonra Raklion 1 alt satiri",
@@ -93,6 +97,10 @@ class BotService : AccessibilityService() {
             "switchLine" to Pair(0.499f, 0.739f),
             "closeChannel" to Pair(0.637f, 0.202f),
             "closeMap" to Pair(0.894f, 0.157f),
+            // Gecis koordinatlari cihazda manuel kaydedilmeden kullanilmaz.
+            "chatOpen" to Pair(0.500f, 0.500f),
+            "raklion1Coord" to Pair(0.500f, 0.500f),
+            "raklion2Coord" to Pair(0.500f, 0.500f),
             "mapScroll" to Pair(0.220f, 0.780f),
             "raklionParent" to Pair(0.220f, 0.390f),
             "raklion1Child" to Pair(0.240f, 0.430f),
@@ -117,6 +125,8 @@ class BotService : AccessibilityService() {
     private var statusView: TextView? = null
     private var startBtn: Button? = null
     private var lineBtn: Button? = null
+    @Volatile private var totalBossKills = 0
+    @Volatile private var currentRoute = "Hazir"
 
     @Volatile
     private var running = false
@@ -163,7 +173,7 @@ class BotService : AccessibilityService() {
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
     private fun say(msg: String) {
-        ui { statusView?.text = msg + "  [tik ok " + sent + " / iptal " + cancelled + "]" }
+        ui { statusView?.text = "$msg | Kesilen boss: $totalBossKills | $currentRoute [tik ok $sent / iptal $cancelled]" }
     }
 
     private fun refreshScreen() {
@@ -508,40 +518,27 @@ class BotService : AccessibilityService() {
         pause(LOAD_SEC * 1000)
     }
 
-    private fun selectRaklion(m: Int) {
-        openMap()
-
-        // Raklion ana satirini OCR ile gercekten bulana kadar kucuk adimlarla kaydir.
-        var parent: TextHit? = null
-        repeat(8) {
-            val b = grab() ?: fail("Harita listesi okunamadi")
-            parent = findRaklionParent(b)
-            if (parent != null) return@repeat
-            if (!swipeMapListDown()) fail("Harita listesi kaydirilamadi")
-            pause(350)
+    private fun requireManualPoint(name: String) {
+        val p = prefs()
+        if (!p.contains(name + "_x") || !p.contains(name + "_y")) {
+            fail("'Nokta Ayarlari'ndan $name koordinatini cihazda manuel kaydet")
         }
-        val parentHit = parent ?: fail("Raklion ana satiri 8 kaydirmada bulunamadi; yanlis satira tiklanmadi")
-        if (!tapPx(parentHit.x * screenW, parentHit.y * screenH)) {
-            fail("Raklion ana satirina dokunulamadi")
-        }
-        pause(700)
-
-        // Alt satirlar acilinca hedef olan Raklion 1/2 yazisini OCR ile bul ve merkezine dokun.
-        var child: TextHit? = null
-        repeat(3) {
-            val b = grab() ?: fail("Raklion alt listesi okunamadi")
-            child = findRaklionChild(b, m)
-            if (child != null) return@repeat
-            pause(400)
-        }
-        val childHit = child ?: fail("Raklion $m alt satiri ekranda okunamadi; yanlis haritaya tiklanmadi")
-        if (!tapPx(childHit.x * screenW, childHit.y * screenH)) {
-            fail("Raklion $m alt satirina dokunulamadi")
-        }
-        pause(1000)
-        // Secimden sonra harita acik kalir; nokta ve boss etiketi ayridir.
     }
 
+    /** Raklion gecisi yalnizca kullanicinin kaydettigi chat ve hedef koordinatlariyla yapilir. */
+    private fun selectRaklion(m: Int) {
+        requireManualPoint("chatOpen")
+        val destination = if (m == 1) "raklion1Coord" else "raklion2Coord"
+        requireManualPoint(destination)
+        closeMapIfOpen()
+        currentRoute = "Raklion $m gecisi"
+        say("Sohbet aciliyor; manuel $destination koordinati kullanilacak")
+        tapPoint("chatOpen")
+        pause(900)
+        tapPoint(destination)
+        pause(LOAD_SEC * 1000)
+        closeMapIfOpen()
+    }
     /** Raklion 2'de tek, Raklion 1'de iki boss hedefi vardir. */
     private fun scanLine(line: Int): List<Int> {
         val result = mutableListOf<Int>()
@@ -563,7 +560,7 @@ class BotService : AccessibilityService() {
         val name = activeTarget
         val bp = pt(name)
         val targetX = bp.first
-        val targetY = bp.second + ICON_DY
+        val targetY = bp.second
         var shot = grab() ?: fail("Hareket baslangicinda ekran goruntusu alinamadi")
         var marker = findPlayerMarker(shot)
             ?: fail("Oyuncu yesil ucgeni bulunamadi. Harita acikken 'Test' yapip tekrar dene.")
@@ -586,8 +583,10 @@ class BotService : AccessibilityService() {
             }
             marker = next
             val targetDistance = distance(marker, targetX, targetY)
-            if (targetDistance <= 0.035f) arrivalCount++ else arrivalCount = 0
-            if (arrivalCount >= 3) {
+            // Kullanici referansindaki gibi yesil ucgen boss simgesinin hemen yaninda olmali.
+            // 0.012 normalize tolerans cihazda test edilerek gerekirse ayarlanir.
+            if (targetDistance <= 0.012f) arrivalCount++ else arrivalCount = 0
+            if (arrivalCount >= 2) {
                 say("Boss konumuna ulasildi")
                 return
             }
@@ -609,80 +608,97 @@ class BotService : AccessibilityService() {
         fail("Boss'a yuruyus 120 saniyede dogrulanamadi. Harita acik birakildi.")
     }
 
+    /** Boss can cubugunu ekranin ust-orta bolgesinde arar; kaybolursa ikinci kontrol beklemez. */
+    private fun bossHealthBarVisible(bitmap: Bitmap): Boolean {
+        val x0 = (bitmap.width * 0.30f).toInt()
+        val x1 = (bitmap.width * 0.70f).toInt()
+        val y0 = (bitmap.height * 0.02f).toInt()
+        val y1 = (bitmap.height * 0.14f).toInt()
+        var bestRun = 0
+        var totalRed = 0
+        for (y in y0..y1) {
+            var run = 0
+            for (x in x0..x1) {
+                val c = bitmap.getPixel(x, y)
+                val r = Color.red(c)
+                val g = Color.green(c)
+                val bl = Color.blue(c)
+                val hpColor = r > 135 && r > g * 1.35f && r > bl * 1.35f
+                if (hpColor) {
+                    run++
+                    totalRed++
+                    if (run > bestRun) bestRun = run
+                } else run = 0
+            }
+        }
+        return bestRun >= bitmap.width * 0.018f && totalRed >= bitmap.width * 0.025f
+    }
+
     private fun fightBoss(m: Int) {
-        // Harita acik kalir; hedef koordinati boss etiketinden ayri tutulur.
-        selectRaklion(m)
+        // runLoop canli bossu dogruladi; harita acikken hedefe tikla ve yakinligi izle.
         walkToBoss(m)
         closeMapIfOpen()
-        pause(700)
+        pause(500)
         tapPoint("manual")
-        say("Oto saldiri basladi; 2 dakika sonra boss kontrol edilecek")
+        currentRoute = "Raklion $m boss savasi"
+        say("Boss can cubugu izleniyor")
         val t0 = System.currentTimeMillis()
-        var aliveChecks = 0
         while (running) {
-            val elapsed = System.currentTimeMillis() - t0
-            if (elapsed < 120_000L) pause(minOf(5_000L, 120_000L - elapsed).toInt())
-            if (System.currentTimeMillis() - t0 >= 120_000L) {
-                if (prefs().getBoolean("buffEnabled", true)) updateBuffThreshold()
-                openMap()
-                val b = grab()
-                if (b == null) {
-                    closeMapIfOpen()
-                    say("Boss durumu okunamadi; sonraki hedefe gecilmiyor")
-                    pause(5_000)
-                    continue
-                }
-                val alive = bossAlive(b, m)
-                closeMapIfOpen()
-                if (!alive) {
-                    // Tek bir olcumle olum karari verme; ikinci kontrolle dogrula.
-                    pause(1500)
-                    openMap()
-                    val confirm = grab()
-                    val stillAlive = confirm != null && bossAlive(confirm, m)
-                    closeMapIfOpen()
-                    if (!stillAlive) {
-                        say("Boss'un kayboldugu iki kontrolle dogrulandi")
-                        break
-                    }
-                    say("Boss hala canli; oto saldiri suruyor")
-                } else {
-                    aliveChecks++
-                    say("Boss hala canli (kontrol " + aliveChecks + "); oto saldiri suruyor")
-                }
-                // Sonraki kontrol de 2 dakika sonra yapilir.
-                val nextCheck = System.currentTimeMillis()
-                while (running && System.currentTimeMillis() - nextCheck < 120_000L) {
-                    pause(minOf(5_000L, 120_000L - (System.currentTimeMillis() - nextCheck)).toInt())
-                }
+            pause(2500)
+            val shot = grab()
+            if (shot == null) {
+                say("Ekran okunamadi; boss oldugu varsayilmiyor")
+                continue
+            }
+            if (!bossHealthBarVisible(shot)) {
+                // Kullanici talebi: can cubugu kaybolunca ek kontrol/ek bekleme yapmadan ilerle.
+                say("Boss can cubugu kayboldu; hedef tamamlandi")
+                break
             }
             if (System.currentTimeMillis() - t0 > FIGHT_TIMEOUT_SEC * 1000L) {
-                say("10 dakika siniri: boss olum dogrulanamadi, guvenli durus")
-                fail("Boss olum dogrulanamadi; rotaya devam etmek icin bot durduruldu")
+                fail("10 dakika icinde boss can cubugu kaybolmadi; bot guvenli sekilde durduruldu")
             }
         }
         tapPoint("manual")
-        pause(800)
+        pause(300)
+    }
+    private fun checkBuffThreshold(): Boolean {
+        if (!prefs().getBoolean("buffEnabled", true)) return false
+        val atkGoal = prefs().getInt("targetAtk", 0)
+        val defGoal = prefs().getInt("targetDef", 0)
+        if (atkGoal <= 0 || defGoal <= 0) {
+            say("Buff esigi icin ATK ve DEF hedeflerinin ikisi de girilmeli")
+            return false
+        }
+        val stats = readCombatStats() ?: run {
+            say("ATK/DEF okunamadi; buff karari verilmedi")
+            return false
+        }
+        val needsBuff = stats.atk < atkGoal && stats.def < defGoal
+        say("ATK/DEF: ${stats.atk}/${stats.def}; hedef: $atkGoal/$defGoal")
+        return needsBuff
     }
 
     private fun runLoop() {
-        val buffEnabled = { prefs().getBoolean("buffEnabled", true) }
-        if (buffEnabled()) {
-            switchLine(1)
-            selectRaklion(2)
+        // Baslangic her zaman Raklion 2 / Wire 1. Buff yalnizca iki deger de esik altindaysa.
+        switchLine(1)
+        selectRaklion(2)
+        if (checkBuffThreshold()) {
             walkToPoint("buffPoint", "Buff konumu")
             closeMapIfOpen()
+            pause(5000)
             verifyStatsAfterBuff()
         }
 
-        // Istenen sira: Raklion 1 kanal 1/2/3, sonra Raklion 2 kanal 1/2/3.
         while (running) {
-            for (mapNo in listOf(1, 2)) {
+            // Onaylanan sira: Raklion 2 Wire 1-3; sonra Raklion 1 Wire 1-3.
+            for (mapNo in listOf(2, 1)) {
                 for (line in 1..3) {
                     if (!running) throw StopEx()
+                    currentRoute = "Raklion $mapNo / Wire $line"
                     switchLine(line)
                     selectRaklion(mapNo)
-                    val count = if (mapNo == 1) 2 else 1
+                    val count = if (mapNo == 2) 1 else 2
                     for (bossIndex in 0 until count) {
                         if (!running) throw StopEx()
                         val target = when {
@@ -691,28 +707,31 @@ class BotService : AccessibilityService() {
                             else -> "targetR1B"
                         }
                         activeTarget = target
-                        val bossNumber = if (mapNo == 1) 1 else 2
                         val first = grab() ?: fail("Boss durumu okunamadi")
                         val firstScore = targetRedFrac(first, target)
                         pause(1200)
                         val second = grab() ?: fail("Boss durumu tekrar okunamadi")
                         val secondScore = targetRedFrac(second, target)
                         if (firstScore < RED_THR && secondScore < RED_THR) {
-                            say("Raklion $mapNo boss ikonu iki kontrolde de soluk: olu kabul edilip atlaniyor")
+                            say("Boss ikonu soluk; hedef zaten olu, atlandi")
                             continue
                         }
                         if (firstScore < RED_THR || secondScore < RED_THR) {
-                            say("Boss ikonu belirsiz; yanlis hedefe gitmemek icin durduruluyor")
-                            fail("Boss canli/olu durumu kesin degil")
+                            fail("Boss ikonu belirsiz; yanlis hedefe gitmemek icin durduruldu")
                         }
+                        currentRoute = "Raklion $mapNo / Wire $line / Boss ${bossIndex + 1}"
                         fightBoss(mapNo)
-                        handleBuffIfNeeded(buffEnabled(), line, mapNo)
+                        totalBossKills++
+                        prefs().edit().putInt("totalBossKills", totalBossKills).apply()
+                        say("Boss kesildi")
+                        if (checkBuffThreshold()) {
+                            handleBuffIfNeeded(true, line, mapNo)
+                        }
                     }
                 }
             }
         }
     }
-
     private fun handleBuffIfNeeded(enabled: Boolean, resumeLine: Int, resumeMap: Int) {
         if (!enabled) {
             pendingBuff = false
@@ -726,7 +745,8 @@ class BotService : AccessibilityService() {
         val targetDef = prefs().getInt("targetDef", 0)
         val needAtk = targetAtk > 0 && stats.atk < targetAtk
         val needDef = targetDef > 0 && stats.def < targetDef
-        if (!needAtk && !needDef) {
+        // Buff yalnizca iki hedef de girilmis ve iki istatistik de dusukse.
+        if (!(targetAtk > 0 && targetDef > 0 && needAtk && needDef)) {
             pendingBuff = false
             say("ATK/DEF hedefleri karsilaniyor: ${stats.atk}/${stats.def}")
             return
@@ -794,15 +814,16 @@ class BotService : AccessibilityService() {
     }
 
     private fun updateBuffThreshold() {
-        if (!prefs().getBoolean("buffEnabled", true)) return
+        if (!prefs().getBoolean("buffEnabled", true)) {
+            pendingBuff = false
+            return
+        }
         val stats = readCombatStats() ?: return
         val targetAtk = prefs().getInt("targetAtk", 0)
         val targetDef = prefs().getInt("targetDef", 0)
-        if ((targetAtk > 0 && stats.atk < targetAtk) ||
-            (targetDef > 0 && stats.def < targetDef)) {
-            pendingBuff = true
-            say("Buff hedefi altinda: ATK/DEF ${stats.atk}/${stats.def}")
-        }
+        pendingBuff = targetAtk > 0 && targetDef > 0 &&
+            stats.atk < targetAtk && stats.def < targetDef
+        if (pendingBuff) say("ATK ve DEF hedefin altinda: ${stats.atk}/${stats.def}")
     }
 
     private fun walkToPoint(pointName: String, description: String) {
@@ -867,6 +888,7 @@ class BotService : AccessibilityService() {
     private fun updateUi() {
         startBtn?.text = if (running) "■ Durdur" else "▶ Baslat"
         lineBtn?.text = "Baslangic kanali: " + startLine
+        statusView?.text = "${if (running) "Calisiyor" else "Hazir"} | Kesilen boss: $totalBossKills | $currentRoute"
     }
 
     // ------------------------------------------------------------------ test
@@ -934,8 +956,9 @@ class BotService : AccessibilityService() {
         st.setTextColor(Color.WHITE)
         st.setBackgroundColor(0xAA000000.toInt())
         st.setPadding(dp(4), dp(2), dp(4), dp(2))
-        st.text = "Hazir"
-        st.maxWidth = dp(260)
+        totalBossKills = prefs().getInt("totalBossKills", 0)
+        st.text = "Hazir | Kesilen boss: $totalBossKills"
+        st.maxWidth = dp(340)
         statusView = st
         col.addView(st)
 
