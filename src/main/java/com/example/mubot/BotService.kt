@@ -643,6 +643,7 @@ class BotService : AccessibilityService() {
         currentRoute = "Raklion $m boss savasi"
         say("Boss can cubugu izleniyor")
         val t0 = System.currentTimeMillis()
+        var sawHealthBar = false
         while (running) {
             pause(2500)
             val shot = grab()
@@ -650,10 +651,14 @@ class BotService : AccessibilityService() {
                 say("Ekran okunamadi; boss oldugu varsayilmiyor")
                 continue
             }
-            if (!bossHealthBarVisible(shot)) {
-                // Kullanici talebi: can cubugu kaybolunca ek kontrol/ek bekleme yapmadan ilerle.
+            if (bossHealthBarVisible(shot)) {
+                sawHealthBar = true
+            } else if (sawHealthBar) {
+                // Can cubugu gorulup kayboldu: ek dogrulama yapmadan ilerle.
                 say("Boss can cubugu kayboldu; hedef tamamlandi")
                 break
+            } else {
+                say("Boss can cubugu henuz algilanmadi; yanlis kill sayimi yapilmiyor")
             }
             if (System.currentTimeMillis() - t0 > FIGHT_TIMEOUT_SEC * 1000L) {
                 fail("10 dakika icinde boss can cubugu kaybolmadi; bot guvenli sekilde durduruldu")
@@ -684,6 +689,7 @@ class BotService : AccessibilityService() {
         switchLine(1)
         selectRaklion(2)
         if (checkBuffThreshold()) {
+            requireManualPoint("buffPoint")
             walkToPoint("buffPoint", "Buff konumu")
             closeMapIfOpen()
             pause(5000)
@@ -707,6 +713,8 @@ class BotService : AccessibilityService() {
                             else -> "targetR1B"
                         }
                         activeTarget = target
+                        requireManualPoint(target)
+                        openMap()
                         val first = grab() ?: fail("Boss durumu okunamadi")
                         val firstScore = targetRedFrac(first, target)
                         pause(1200)
@@ -752,6 +760,7 @@ class BotService : AccessibilityService() {
             return
         }
         say("Buff noktasina gidiliyor; mevcut ATK/DEF ${stats.atk}/${stats.def}")
+        requireManualPoint("buffPoint")
         switchLine(1)
         selectRaklion(2)
         walkToPoint("buffPoint", "Buff konumu")
