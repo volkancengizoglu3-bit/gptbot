@@ -27,7 +27,7 @@ jobs:
         run: gradle assembleDebug --no-daemon
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/debug/*.apk muimm-bot.apk
+        run: cp build/outputs/apk/debug/*.apk muimm-bot.apk
 
       - name: Publish APK release
         uses: softprops/action-gh-release@v2
