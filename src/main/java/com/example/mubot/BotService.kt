@@ -52,7 +52,7 @@ class BotService : AccessibilityService() {
         const val ICON_DY = -0.038f      // isim etiketinden ikon merkezine dikey fark
         const val RED_THR = 0.025f       // etiket bolgesinde kirmizi piksel orani esigi
         const val LOAD_SEC = 5           // kanal degisince yukleme bekleme
-        const val RECHECK_SEC = 8        // savas sirasinda boss durumunu kontrol araligi
+        const val RECHECK_SEC = 10       // oto atak basladiktan 2 dakika sonra harita kontrol araligi
         const val FIGHT_TIMEOUT_SEC = 600
 
         val NAMES = listOf(
@@ -635,34 +635,54 @@ class BotService : AccessibilityService() {
     }
 
     private fun fightBoss(m: Int) {
-        // runLoop canli bossu dogruladi; harita acikken hedefe tikla ve yakinligi izle.
+        // Boss'a varinca oto atagi baslat; ilk 2 dakika harita kontrolu yapma.
         walkToBoss(m)
         closeMapIfOpen()
         pause(500)
         tapPoint("manual")
         currentRoute = "Raklion $m boss savasi"
-        say("Boss can cubugu izleniyor")
+        say("Oto atak basladi; 2 dakika sonra harita kontrolu")
+        pause(120_000)
+
         val t0 = System.currentTimeMillis()
-        var sawHealthBar = false
         while (running) {
-            pause(2500)
-            val shot = grab()
-            if (shot == null) {
-                say("Ekran okunamadi; boss oldugu varsayilmiyor")
+            // Haritadan boss ikonunu kontrol et; can cubugu kaybolmasi tek basina yeterli degil.
+            openMap()
+            val first = grab()
+            if (first == null) {
+                closeMapIfOpen()
+                say("Harita okunamadi; oto atak devam ediyor")
+                pause(10_000)
                 continue
             }
-            if (bossHealthBarVisible(shot)) {
-                sawHealthBar = true
-            } else if (sawHealthBar) {
-                // Can cubugu gorulup kayboldu: ek dogrulama yapmadan ilerle.
-                say("Boss can cubugu kayboldu; hedef tamamlandi")
+            val firstScore = targetRedFrac(first, activeTarget)
+            pause(1_000)
+            val second = grab()
+            if (second == null) {
+                closeMapIfOpen()
+                say("Boss ikonu tekrar okunamadi; oto atak devam ediyor")
+                pause(10_000)
+                continue
+            }
+            val secondScore = targetRedFrac(second, activeTarget)
+
+            // Kahverengiye/soluga donen ikon iki okumada da kirmizi esiginin altindaysa olu kabul et.
+            if (firstScore < RED_THR && secondScore < RED_THR) {
+                say("Boss ikonu kahverengi/soluk; olum dogrulandi")
+                closeMapIfOpen()
                 break
+            }
+
+            closeMapIfOpen()
+            if (firstScore >= RED_THR && secondScore >= RED_THR) {
+                say("Boss hala canli; oto atak suruyor")
             } else {
-                say("Boss can cubugu henuz algilanmadi; yanlis kill sayimi yapilmiyor")
+                say("Boss durumu belirsiz; oto atak suruyor, sonraki kontrolde tekrar bakilacak")
             }
             if (System.currentTimeMillis() - t0 > FIGHT_TIMEOUT_SEC * 1000L) {
-                fail("10 dakika icinde boss can cubugu kaybolmadi; bot guvenli sekilde durduruldu")
+                fail("10 dakika icinde bossun oldugu haritadan dogrulanamadi; bot durduruldu")
             }
+            pause(10_000)
         }
         tapPoint("manual")
         pause(300)
