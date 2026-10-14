@@ -102,7 +102,6 @@ class BotService : AccessibilityService() {
             "manual" to Pair(0.972f, 0.473f)
         )
 
-        val WALK_OPTIONS = listOf(10, 15, 20, 30, 45)
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -114,14 +113,12 @@ class BotService : AccessibilityService() {
     private var statusView: TextView? = null
     private var startBtn: Button? = null
     private var lineBtn: Button? = null
-    private var walkBtn: Button? = null
 
     @Volatile
     private var running = false
     private var worker: Thread? = null
 
     private var startLine = 1
-    private var walkIdx = 1
     private var sent = 0
     private var cancelled = 0
     private var lastShot = 0L
@@ -816,7 +813,6 @@ class BotService : AccessibilityService() {
     private fun updateUi() {
         startBtn?.text = if (running) "■ Durdur" else "▶ Baslat"
         lineBtn?.text = "Baslangic kanali: " + startLine
-        walkBtn?.text = "Yuruyus suresi: " + WALK_OPTIONS[walkIdx] + " sn"
     }
 
     // ------------------------------------------------------------------ test
@@ -899,13 +895,6 @@ class BotService : AccessibilityService() {
         }
         lineBtn = lb
         addBtn(col, lb)
-
-        val wb = mkBtn("Yuruyus suresi") {
-            walkIdx = (walkIdx + 1) % WALK_OPTIONS.size
-            updateUi()
-        }
-        walkBtn = wb
-        addBtn(col, wb)
 
         addBtn(col, mkBtn("Test") { runTest() })
         addBtn(col, mkBtn("Ayar") { toggleMenu() })
